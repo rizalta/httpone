@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"slices"
 )
 
 type RequestLine struct {
@@ -44,7 +43,7 @@ func (r *Request) parse(data []byte) (int, error) {
 		return n, err
 	}
 
-	if rl == nil {
+	if n == 0 {
 		return 0, nil
 	}
 
@@ -54,30 +53,43 @@ func (r *Request) parse(data []byte) (int, error) {
 	return n, nil
 }
 
-var CRLF = []byte("\r\n")
+var crlf = []byte("\r\n")
 var (
 	ErrMalformedRequestLine   = errors.New("malformed request-line")
 	ErrUnsupportedHTTPVersion = errors.New("unsupported http version")
 	ErrInvalidMethod          = errors.New("invalid method")
 )
 
-var methods = []string{"GET", "POST"}
+var methods = map[string]struct{}{
+	"GET":     {},
+	"POST":    {},
+	"PUT":     {},
+	"DELETE":  {},
+	"HEAD":    {},
+	"OPTIONS": {},
+	"PATCH":   {},
+}
+
+func isValidMethod(m string) bool {
+	_, ok := methods[m]
+	return ok
+}
 
 func parseRequestLine(b []byte) (*RequestLine, int, error) {
-	idx := bytes.Index(b, CRLF)
+	idx := bytes.Index(b, crlf)
 	if idx == -1 {
 		return nil, 0, nil
 	}
 
 	requestLine := b[:idx]
-	read := len(requestLine) + len(CRLF)
+	read := len(requestLine) + len(crlf)
 
 	parts := bytes.Split(requestLine, []byte(" "))
 	if len(parts) != 3 {
 		return nil, 0, ErrMalformedRequestLine
 	}
 
-	if !slices.Contains(methods, string(parts[0])) {
+	if !isValidMethod(string(parts[0])) {
 		return nil, 0, ErrInvalidMethod
 	}
 
@@ -106,6 +118,10 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	for !request.done() {
 		n, err := reader.Read(buf[bufLen:])
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				request.state = StateDone
+				break
+			}
 			return nil, err
 		}
 		bufLen += n

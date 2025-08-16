@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"strings"
+
+	"github.com/rizalta/httpone/internal/request"
 )
 
 func main() {
@@ -13,52 +13,28 @@ func main() {
 	if err != nil {
 		log.Fatal("error", err)
 	}
+	defer listener.Close()
 
 	for {
 		conn, err := listener.Accept()
+		if err != nil {
+			log.Printf("connection not accepted")
+			break
+		}
+		defer conn.Close()
 		log.Println("connection accepted")
 
+		req, err := request.RequestFromReader(conn)
 		if err != nil {
-			log.Fatal("error", err)
+			log.Printf("error reading request %v\n", err)
 		}
 
-		for line := range getLinesChannel(conn) {
-			fmt.Printf("%s\n", line)
-		}
+		fmt.Println("Request line:")
+		fmt.Printf("- Method: %s\n", req.RequestLine.Method)
+		fmt.Printf("- Target: %s\n", req.RequestLine.RequestTarget)
+		fmt.Printf("- Version: %s\n\n", req.RequestLine.HTTPVersion)
+
 		log.Println("connection closed")
+		conn.Close()
 	}
-}
-
-func getLinesChannel(f io.ReadCloser) <-chan string {
-	ch := make(chan string, 1)
-
-	go func() {
-		defer f.Close()
-		defer close(ch)
-
-		s := ""
-		for {
-			data := make([]byte, 8)
-			n, err := f.Read(data)
-			if err != nil {
-				break
-			}
-
-			data = data[:n]
-			if i := strings.IndexByte(string(data), '\n'); i != -1 {
-				s += string(data[:i])
-				data = data[i+1:]
-				ch <- s
-				s = ""
-			}
-
-			s += string(data)
-		}
-
-		if len(s) != 0 {
-			ch <- s
-		}
-	}()
-
-	return ch
 }
