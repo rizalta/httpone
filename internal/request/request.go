@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+
+	"github.com/rizalta/httpone/internal/headers"
 )
 
 type RequestLine struct {
@@ -16,12 +18,14 @@ type RequestLine struct {
 type parserState string
 
 const (
-	StateInit parserState = "init"
-	StateDone parserState = "done"
+	StateInit   parserState = "init"
+	StateHeader parserState = "header"
+	StateDone   parserState = "done"
 )
 
 type Request struct {
 	RequestLine RequestLine
+	Headers     headers.Headers
 	state       parserState
 }
 
@@ -30,27 +34,43 @@ func (r *Request) done() bool {
 }
 
 func newRequest() *Request {
-	return &Request{state: StateInit}
+	return &Request{
+		state:   StateInit,
+		Headers: headers.NewHeaders(),
+	}
 }
 
 func (r *Request) parse(data []byte) (int, error) {
-	if r.state == StateDone {
+	switch r.state {
+	case StateDone:
 		return 0, nil
+
+	case StateInit:
+		rl, n, err := parseRequestLine(data)
+		if err != nil {
+			return 0, err
+		}
+		if n == 0 {
+			return 0, nil
+		}
+
+		r.RequestLine = *rl
+		r.state = StateHeader
+
+		return n, nil
+
+	case StateHeader:
+		n, done, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
+		}
+		if done {
+			r.state = StateDone
+		}
+		return n, nil
 	}
 
-	rl, n, err := parseRequestLine(data)
-	if err != nil {
-		return n, err
-	}
-
-	if n == 0 {
-		return 0, nil
-	}
-
-	r.RequestLine = *rl
-	r.state = StateDone
-
-	return n, nil
+	return 0, nil
 }
 
 var crlf = []byte("\r\n")
@@ -115,24 +135,40 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 
 	buf := make([]byte, 1024)
 	bufLen := 0
+	eof := false
+
 	for !request.done() {
-		n, err := reader.Read(buf[bufLen:])
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				request.state = StateDone
-				break
+		if !eof {
+			n, err := reader.Read(buf[bufLen:])
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					eof = true
+					continue
+				}
+				return nil, err
 			}
-			return nil, err
+			bufLen += n
 		}
-		bufLen += n
 
 		readN, err := request.parse(buf[:bufLen])
 		if err != nil {
 			return nil, err
 		}
 
-		copy(buf, buf[readN:bufLen])
-		bufLen -= readN
+		if readN > 0 {
+			copy(buf, buf[readN:bufLen])
+			bufLen -= readN
+			continue
+		}
+
+		if eof {
+			return nil, io.ErrUnexpectedEOF
+		}
+
+		if bufLen == len(buf) {
+			return nil, errors.New("buffer full without progress")
+		}
+
 	}
 
 	return request, nil
