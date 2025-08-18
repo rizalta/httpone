@@ -4,7 +4,9 @@ package request
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
+	"strconv"
 
 	"github.com/rizalta/httpone/internal/headers"
 )
@@ -18,14 +20,16 @@ type RequestLine struct {
 type parserState string
 
 const (
-	StateInit   parserState = "init"
-	StateHeader parserState = "header"
-	StateDone   parserState = "done"
+	StateInit    parserState = "init"
+	StateHeaders parserState = "headers"
+	StateBody    parserState = "body"
+	StateDone    parserState = "done"
 )
 
 type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
+	Body        []byte
 	state       parserState
 }
 
@@ -55,19 +59,41 @@ func (r *Request) parse(data []byte) (int, error) {
 		}
 
 		r.RequestLine = *rl
-		r.state = StateHeader
+		r.state = StateHeaders
 
 		return n, nil
 
-	case StateHeader:
+	case StateHeaders:
 		n, done, err := r.Headers.Parse(data)
 		if err != nil {
 			return 0, err
 		}
 		if done {
-			r.state = StateDone
+			r.state = StateBody
 		}
 		return n, nil
+
+	case StateBody:
+		lengthStr := r.Headers.Get("Content-Length")
+		if lengthStr == "" {
+			r.state = StateDone
+			return 0, nil
+		}
+		length, err := strconv.Atoi(lengthStr)
+		if err != nil {
+			return 0, fmt.Errorf("invalid content length")
+		}
+
+		needed := length - len(r.Body)
+		available := len(data)
+		read := min(needed, available)
+
+		r.Body = append(r.Body, data[:read]...)
+		if len(r.Body) == length {
+			r.state = StateDone
+		}
+
+		return read, nil
 	}
 
 	return 0, nil
@@ -143,11 +169,12 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 			if err != nil {
 				if errors.Is(err, io.EOF) {
 					eof = true
-					continue
+				} else {
+					return nil, err
 				}
-				return nil, err
+			} else {
+				bufLen += n
 			}
-			bufLen += n
 		}
 
 		readN, err := request.parse(buf[:bufLen])
@@ -162,13 +189,23 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		}
 
 		if eof {
-			return nil, io.ErrUnexpectedEOF
+			if bufLen > 0 && !request.done() {
+				_, err := request.parse(buf[:bufLen])
+				if err != nil {
+					return nil, err
+				}
+				if !request.done() {
+					return nil, io.ErrUnexpectedEOF
+				}
+			} else if bufLen == 0 && !request.done() {
+				return nil, io.ErrUnexpectedEOF
+			}
+			break
 		}
 
 		if bufLen == len(buf) {
 			return nil, errors.New("buffer full without progress")
 		}
-
 	}
 
 	return request, nil
