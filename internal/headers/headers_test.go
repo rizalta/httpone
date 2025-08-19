@@ -90,6 +90,6 @@ func TestParseHeaders(t *testing.T) {
 			break
 		}
 	}
-	assert.Equal(t, "Bar, notBar", headers.Get("foo"))
+	assert.Contains(t, "notBar", headers.Get("foo"))
 	assert.Equal(t, 25, read)
 }

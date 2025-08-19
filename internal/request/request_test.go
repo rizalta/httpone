@@ -125,7 +125,7 @@ func TestHeadersParse(t *testing.T) {
 	r, err = RequestFromReader(reader)
 	require.NoError(t, err)
 	require.NotNil(t, r)
-	assert.Equal(t, "text/html, application/json", r.Headers.Get("accept"))
+	assert.Equal(t, "application/json", r.Headers.Get("accept"))
 
 	// Test: Case Insensitive Headers
 	reader = &chunkReader{

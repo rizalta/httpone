@@ -36,7 +36,6 @@ func GetDefaultHeaders(contentLen int) headers.Headers {
 	h := headers.NewHeaders()
 
 	h.Set("content-length", strconv.Itoa(contentLen))
-	h.Set("connection", "close")
 	h.Set("content-type", "text/plain")
 
 	return h
@@ -44,8 +43,8 @@ func GetDefaultHeaders(contentLen int) headers.Headers {
 
 func WriteHeaders(w io.Writer, headers headers.Headers) error {
 	b := []byte{}
-	for n, v := range headers {
-		b = fmt.Appendf(b, "%s: %s\r\n", n, v)
+	for n := range headers {
+		b = fmt.Appendf(b, "%s: %s\r\n", n, headers.Get(n))
 	}
 	b = fmt.Appendf(b, "\r\n")
 

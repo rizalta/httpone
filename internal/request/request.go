@@ -4,7 +4,6 @@ package request
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"strconv"
 
@@ -35,6 +34,19 @@ type Request struct {
 
 func (r *Request) done() bool {
 	return r.state == StateDone
+}
+
+func (r *Request) contentLength() int {
+	contentLenStr := r.Headers.Get("content-length")
+	if contentLenStr == "" {
+		return 0
+	}
+
+	contentLen, err := strconv.Atoi(contentLenStr)
+	if err != nil {
+		return 0
+	}
+	return max(0, contentLen)
 }
 
 func newRequest() *Request {
@@ -69,19 +81,19 @@ func (r *Request) parse(data []byte) (int, error) {
 			return 0, err
 		}
 		if done {
-			r.state = StateBody
+			if r.contentLength() > 0 {
+				r.state = StateBody
+			} else {
+				r.state = StateDone
+			}
 		}
 		return n, nil
 
 	case StateBody:
-		lengthStr := r.Headers.Get("Content-Length")
-		if lengthStr == "" {
+		length := r.contentLength()
+		if length == 0 {
 			r.state = StateDone
 			return 0, nil
-		}
-		length, err := strconv.Atoi(lengthStr)
-		if err != nil {
-			return 0, fmt.Errorf("invalid content length")
 		}
 
 		needed := length - len(r.Body)
@@ -159,52 +171,42 @@ func parseRequestLine(b []byte) (*RequestLine, int, error) {
 func RequestFromReader(reader io.Reader) (*Request, error) {
 	request := newRequest()
 
-	buf := make([]byte, 1024)
-	bufLen := 0
-	eof := false
+	buf := &bytes.Buffer{}
 
 	for !request.done() {
-		if !eof {
-			n, err := reader.Read(buf[bufLen:])
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					eof = true
-				} else {
-					return nil, err
-				}
-			} else {
-				bufLen += n
-			}
-		}
-
-		readN, err := request.parse(buf[:bufLen])
+		data := buf.Bytes()
+		readN, err := request.parse(data)
 		if err != nil {
 			return nil, err
 		}
 
 		if readN > 0 {
-			copy(buf, buf[readN:bufLen])
-			bufLen -= readN
+			buf.Next(readN)
 			continue
 		}
 
-		if eof {
-			if bufLen > 0 && !request.done() {
-				_, err := request.parse(buf[:bufLen])
-				if err != nil {
-					return nil, err
+		chunk := make([]byte, 1024)
+		n, err := reader.Read(chunk)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, err
+		}
+
+		if n > 0 {
+			buf.Write(chunk[:n])
+		}
+
+		if errors.Is(err, io.EOF) && n == 0 {
+			if buf.Len() > 0 {
+				_, parseErr := request.parse(buf.Bytes())
+				if parseErr != nil {
+					return nil, parseErr
 				}
-				if !request.done() {
-					return nil, io.ErrUnexpectedEOF
-				}
-			} else if bufLen == 0 && !request.done() {
+			}
+
+			if !request.done() {
 				return nil, io.ErrUnexpectedEOF
 			}
 			break
-		}
-
-		if bufLen == len(buf) {
-			return nil, errors.New("buffer full without progress")
 		}
 	}
 

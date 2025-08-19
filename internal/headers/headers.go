@@ -4,23 +4,28 @@ package headers
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"strings"
 	"unicode"
 )
 
-type Headers map[string]string
+type Headers map[string][]string
 
 func (h Headers) Get(name string) string {
-	return h[strings.ToLower(name)]
+	if values, ok := h[strings.ToLower(name)]; ok {
+		return values[0]
+	} else {
+		return ""
+	}
 }
 
 func (h Headers) Set(name, value string) {
 	name = strings.ToLower(name)
-	if v, ok := h[name]; ok {
-		value = fmt.Sprintf("%s, %s", v, value)
-	}
-	h[name] = value
+	h[name] = []string{value}
+}
+
+func (h Headers) Add(name, value string) {
+	name = strings.ToLower(name)
+	h[name] = append(h[name], value)
 }
 
 func NewHeaders() Headers {
