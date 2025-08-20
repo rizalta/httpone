@@ -2,7 +2,6 @@
 package server
 
 import (
-	"bytes"
 	"fmt"
 	"log"
 	"net"
@@ -11,6 +10,8 @@ import (
 	"github.com/rizalta/httpone/internal/request"
 	"github.com/rizalta/httpone/internal/response"
 )
+
+type Handler func(w response.Writer, req *request.Request)
 
 type Server struct {
 	listener net.Listener
@@ -58,25 +59,13 @@ func (s *Server) listen() {
 
 func (s *Server) handle(conn net.Conn) {
 	defer conn.Close()
+	w := response.NewResponse(conn)
 	req, err := request.RequestFromReader(conn)
-	fmt.Printf("req: %v\n", req)
 	if err != nil {
-		hErr := &HandlerError{
-			StatusCode: response.StatusInternalServerError,
-			Message:    err.Error(),
-		}
-		hErr.Write(conn)
+		w.WriteHeader(response.StatusInternalServerError)
+		w.Write([]byte(err.Error()))
 		return
 	}
-	buf := bytes.NewBuffer([]byte{})
-	hErr := s.handler(buf, req)
-	if hErr != nil {
-		hErr.Write(conn)
-		return
-	}
-	b := buf.Bytes()
-	headers := response.GetDefaultHeaders(len(b))
-	response.WriteStatusLine(conn, response.StatusOK)
-	response.WriteHeaders(conn, headers)
-	conn.Write(b)
+
+	s.handler(w, req)
 }

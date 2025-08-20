@@ -4,51 +4,76 @@ package response
 import (
 	"fmt"
 	"io"
-	"strconv"
+	"unicode"
 
 	"github.com/rizalta/httpone/internal/headers"
 )
 
-type StatusCode int
+type Writer interface {
+	WriteHeader(statusCode StatusCode) error
+	Write([]byte) (int, error)
+	Headers() headers.Headers
+}
 
-const (
-	StatusOK                  StatusCode = 200
-	StatusBadRequest          StatusCode = 400
-	StatusInternalServerError StatusCode = 500
-)
+type response struct {
+	wroteHeader bool
+	headers     headers.Headers
+	writer      io.Writer
+}
 
-func WriteStatusLine(w io.Writer, statusCode StatusCode) error {
-	statusLine := fmt.Appendf(nil, "HTTP/1.1 %d ", statusCode)
-	switch statusCode {
-	case StatusOK:
-		statusLine = fmt.Appendf(statusLine, "OK\r\n")
-	case StatusBadRequest:
-		statusLine = fmt.Appendf(statusLine, "Bad Request\r\n")
-	case StatusInternalServerError:
-		statusLine = fmt.Appendf(statusLine, "Internal Server Error\r\n")
+func NewResponse(w io.Writer) *response {
+	return &response{
+		writer:  w,
+		headers: GetDefaultHeaders(),
 	}
+}
 
-	_, err := w.Write(statusLine)
+func (w *response) WriteHeader(statusCode StatusCode) error {
+	w.wroteHeader = true
+	header := fmt.Appendf(nil, "HTTP/1.1 %d %s\r\n", statusCode, statusMessage[statusCode])
+	for n := range w.headers {
+		header = fmt.Appendf(header, "%s: %s\r\n", formatHeeaderName(n), w.headers.Get(n))
+	}
+	_, err := w.writer.Write(header)
 	return err
 }
 
-func GetDefaultHeaders(contentLen int) headers.Headers {
-	h := headers.NewHeaders()
+func (w *response) Write(p []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(StatusOK)
+	}
+	contentLenHeader := fmt.Appendf(nil, "%s: %d\r\n", "Content-Length", len(p))
+	w.writer.Write(contentLenHeader)
+	w.writer.Write([]byte("\r\n"))
+	return w.writer.Write(p)
+}
 
-	h.Set("content-length", strconv.Itoa(contentLen))
+func GetDefaultHeaders() headers.Headers {
+	h := headers.NewHeaders()
+	h.Set("connection", "close")
 	h.Set("content-type", "text/plain")
 
 	return h
 }
 
-func WriteHeaders(w io.Writer, headers headers.Headers) error {
-	b := []byte{}
-	for n := range headers {
-		b = fmt.Appendf(b, "%s: %s\r\n", n, headers.Get(n))
+func formatHeeaderName(name string) string {
+	runes := []rune(name)
+	delimiter := '-'
+	capNext := true
+	for i, r := range runes {
+		if r == delimiter {
+			capNext = true
+			continue
+		}
+		if capNext {
+			runes[i] = unicode.ToUpper(r)
+			capNext = false
+		}
 	}
-	b = fmt.Appendf(b, "\r\n")
 
-	_, err := w.Write(b)
+	return string(runes)
+}
 
-	return err
+func (w *response) Headers() headers.Headers {
+	return w.headers
 }
