@@ -13,7 +13,7 @@ import (
 
 const port = 42069
 
-var html400 = `<html>
+var html400 = []byte(`<html>
   <head>
     <title>400 Bad Request</title>
   </head>
@@ -21,9 +21,9 @@ var html400 = `<html>
     <h1>Bad Request</h1>
     <p>Your request honestly kinda sucked.</p>
   </body>
-	</html>`
+	</html>`)
 
-var html500 = `<html>
+var html500 = []byte(`<html>
   <head>
     <title>500 Internal Server Error</title>
   </head>
@@ -31,9 +31,9 @@ var html500 = `<html>
     <h1>Internal Server Error</h1>
     <p>Okay, you know what? This one is on me.</p>
   </body>
-</html>`
+</html>`)
 
-var html200 = `<html>
+var html200 = []byte(`<html>
   <head>
     <title>200 OK</title>
   </head>
@@ -41,23 +41,26 @@ var html200 = `<html>
     <h1>Success!</h1>
     <p>Your request was an absolute banger.</p>
   </body>
-</html>`
+</html>`)
 
 func main() {
 	server, err := server.Serve(port, func(w response.Writer, req *request.Request) {
-		w.Headers().Set("Content-Type", "text/html")
-		if req.RequestLine.RequestTarget == "/yourproblem" {
-			w.WriteHeader(response.StatusBadRequest)
-			w.Write([]byte(html400))
-			return
-		}
-		if req.RequestLine.RequestTarget == "/myproblem" {
-			w.WriteHeader(response.StatusInternalServerError)
-			w.Write([]byte(html500))
-			return
+		var status response.StatusCode = response.StatusOK
+		var body []byte
+		switch req.RequestLine.RequestTarget {
+		case "/yourproblem":
+			status = response.StatusBadRequest
+			body = html400
+		case "/myproblem":
+			status = response.StatusInternalServerError
+			body = html500
+		default:
+			body = html200
 		}
 
-		w.Write([]byte(html200))
+		w.Headers().Set("Content-Type", "text/html")
+		w.WriteHeader(status)
+		w.Write(body)
 	})
 	if err != nil {
 		log.Fatalf("Error starting server: %v", err)

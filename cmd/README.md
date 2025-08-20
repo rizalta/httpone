@@ -15,4 +15,3 @@ and how a basic HTTP server handles connections.
 * Parses raw HTTP/1.1 requests.
 * Handles basic routing.
 * Constructs and sends HTTP responses.
-* Chunked encoding
