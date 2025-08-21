@@ -32,7 +32,7 @@ func (w *response) WriteHeader(statusCode StatusCode) error {
 	w.wroteHeader = true
 	header := fmt.Appendf(nil, "HTTP/1.1 %d %s\r\n", statusCode, statusMessage[statusCode])
 	for n := range w.headers {
-		header = fmt.Appendf(header, "%s: %s\r\n", formatHeeaderName(n), w.headers.Get(n))
+		header = fmt.Appendf(header, "%s: %s\r\n", formatHeaderName(n), w.headers.Get(n))
 	}
 	_, err := w.writer.Write(header)
 	return err
@@ -42,9 +42,11 @@ func (w *response) Write(p []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(StatusOK)
 	}
-	contentLenHeader := fmt.Appendf(nil, "%s: %d\r\n", "Content-Length", len(p))
-	w.writer.Write(contentLenHeader)
-	w.writer.Write([]byte("\r\n"))
+	contentLenHeader := fmt.Appendf(nil, "%s: %d\r\n\r\n", "Content-Length", len(p))
+	_, err := w.writer.Write(contentLenHeader)
+	if err != nil {
+		return 0, err
+	}
 	return w.writer.Write(p)
 }
 
@@ -56,7 +58,7 @@ func GetDefaultHeaders() headers.Headers {
 	return h
 }
 
-func formatHeeaderName(name string) string {
+func formatHeaderName(name string) string {
 	runes := []rune(name)
 	delimiter := '-'
 	capNext := true
