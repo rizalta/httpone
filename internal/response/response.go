@@ -15,31 +15,41 @@ type Writer interface {
 	Headers() headers.Headers
 }
 
+type writerState int
+
+const (
+	stateInit writerState = iota
+	stateHeader
+	stateBody
+	stateDone
+)
+
 type response struct {
-	wroteHeader bool
-	headers     headers.Headers
-	writer      io.Writer
+	state   writerState
+	headers headers.Headers
+	writer  io.Writer
 }
 
 func NewResponse(w io.Writer) *response {
 	return &response{
 		writer:  w,
 		headers: GetDefaultHeaders(),
+		state:   stateInit,
 	}
 }
 
 func (w *response) WriteHeader(statusCode StatusCode) error {
-	w.wroteHeader = true
 	header := fmt.Appendf(nil, "HTTP/1.1 %d %s\r\n", statusCode, statusMessage[statusCode])
 	for n := range w.headers {
 		header = fmt.Appendf(header, "%s: %s\r\n", formatHeaderName(n), w.headers.Get(n))
 	}
 	_, err := w.writer.Write(header)
+	w.state = stateHeader
 	return err
 }
 
 func (w *response) Write(p []byte) (int, error) {
-	if !w.wroteHeader {
+	if w.state == stateInit {
 		w.WriteHeader(StatusOK)
 	}
 	contentLenHeader := fmt.Appendf(nil, "%s: %d\r\n\r\n", "Content-Length", len(p))
@@ -47,6 +57,7 @@ func (w *response) Write(p []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	w.state = stateBody
 	return w.writer.Write(p)
 }
 
@@ -78,4 +89,16 @@ func formatHeaderName(name string) string {
 
 func (w *response) Headers() headers.Headers {
 	return w.headers
+}
+
+func (w *response) Flush() {
+	switch w.state {
+	case stateBody:
+		return
+	case stateHeader:
+		w.writer.Write([]byte("\r\n"))
+	case stateInit:
+		w.WriteHeader(StatusOK)
+		w.writer.Write([]byte("\r\n"))
+	}
 }

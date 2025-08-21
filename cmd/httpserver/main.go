@@ -47,20 +47,19 @@ func main() {
 	server, err := server.Serve(port, func(w response.Writer, req *request.Request) {
 		var status response.StatusCode = response.StatusOK
 		var body []byte
+		w.Headers().Set("Content-Type", "text/html")
 		switch req.RequestLine.RequestTarget {
 		case "/yourproblem":
 			status = response.StatusBadRequest
 			body = html400
+			w.WriteHeader(status)
+			w.Write(body)
 		case "/myproblem":
 			status = response.StatusInternalServerError
 			body = html500
-		default:
-			body = html200
+			w.WriteHeader(status)
+			w.Write(body)
 		}
-
-		w.Headers().Set("Content-Type", "text/html")
-		w.WriteHeader(status)
-		w.Write(body)
 	})
 	if err != nil {
 		log.Fatalf("Error starting server: %v", err)
